@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 
+"carrega os parametros salvos em 'params_path'"
 def carregarParametros(params_path):
     if not os.path.exists(params_path):
         raise FileNotFoundError(
@@ -12,9 +13,9 @@ def carregarParametros(params_path):
         return {
             "K": np.asarray(data["K"], dtype=np.float32),
             "dist": np.asarray(data["dist"], dtype=np.float32),
-            "valid_images": data["valid_images"].copy(),
-            "objpoints": data["objpoints"].copy(),
-            "imgpoints": data["imgpoints"].copy(),
+            "valid_images": data["validImages"].copy(),
+            "objpoints": data["objPoints"].copy(),
+            "imgpoints": data["imgPoints"].copy(),
             "rvecs": data["rvecs"].copy(),
             "tvecs": data["tvecs"].copy(),
         }
