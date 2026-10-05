@@ -1,95 +1,128 @@
-"""
-===============================================================================
-Módulo de Calibração de Câmera Monocular (Método de Zhang)
-Trabalho Acadêmico de Visão Computacional e Processamento de Imagens - VRI/UFPR
-===============================================================================
-"""
-
 import cv2
 import numpy as np
 import glob
 import os
 
-def calibrar_camera(dir_imagens='imagens', grid_size=(4, 9), square_size=30.0, output_dir='resultados'):
-    """
-    Executa a calibração de câmera pelo Método de Zhang (cv2.calibrateCamera),
-    extrai os parâmetros intrínsecos e extrínsecos, calcula o erro RMS e salva 
-    imagens de cantos detectados e Undistortion para TODAS as imagens válidas em resultados/.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    
+"Procura e ordena todos os caminhos de imagens disponiveis no arquivo 'imgDir'"
+def preproces(imgDir = 'imagens'):
+    paths = []
     extensions = ('*.jpeg', '*.jpg', '*.png')
-    images_paths = []
     for ext in extensions:
-        images_paths.extend(glob.glob(os.path.join(dir_imagens, ext)))
-    images_paths = sorted(images_paths)
+        paths.extend(glob.glob(os.path.join(imgDir, ext)))
+    paths = sorted(paths)
     
-    if not images_paths:
-        raise FileNotFoundError(f"Nenhuma imagem encontrada na pasta '{dir_imagens}'.")
+    if not paths:
+        raise FileNotFoundError(f"Nenhuma imagem encontrada na pasta '{imgDir}'.")
+    return paths
 
-    print(f"=== 1. Pré-processamento e Detecção dos Cantos ===")
-    print(f"Total de imagens carregadas: {len(images_paths)}")
-    print(f"Tamanho da grade interna (GRID_SIZE): {grid_size} (largura x altura em cantos internos)")
-    print(f"Tamanho do quadrado do tabuleiro (SQUARE_SIZE): {square_size} mm\n")
+"Detecta os cantos internos do tabuleiro"
+def cornersDetection(imgPaths, gridSize, sqSize, outDir):
+    print(f"Total de imagens carregadas: {len(imgPaths)}")
+    print(f"Tamanho da grade interna (gridSize): {gridSize} (largura x altura em cantos internos)")
+    print(f"Tamanho do quadrado do tabuleiro (sqSize): {sqSize} mm\n")
+    auxObj = np.zeros((gridSize[0] * gridSize[1], 3), np.float32)
+    auxObj[:, :2] = np.mgrid[0:gridSize[0], 0:gridSize[1]].T.reshape(-1, 2) * sqSize
 
-    objp = np.zeros((grid_size[0] * grid_size[1], 3), np.float32)
-    objp[:, :2] = np.mgrid[0:grid_size[0], 0:grid_size[1]].T.reshape(-1, 2) * square_size
-
-    objpoints = []
-    imgpoints = []
-    valid_images = []
-    image_shapes = None
+    objPoints = []
+    imgPoints = []
+    validImages = []
+    imgS = None
 
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-    for i, fname in enumerate(images_paths):
+    for i, fname in enumerate(imgPaths):
         img = cv2.imread(fname)
         if img is None:
             continue
             
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        if image_shapes is None:
-            image_shapes = gray.shape[::-1]
+        if imgS is None:
+            imgS = gray.shape[::-1]
 
         # Detecção de cantos
         ret, corners = cv2.findChessboardCorners(
-            gray, grid_size, 
+            gray, gridSize, 
             cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
         )
         
         if not ret:
             ret, corners = cv2.findChessboardCornersSB(
-                gray, grid_size, 
+                gray, gridSize, 
                 cv2.CALIB_CB_EXHAUSTIVE + cv2.CALIB_CB_ACCURACY
             )
 
         if ret:
             corners_subpixel = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-            objpoints.append(objp)
-            imgpoints.append(corners_subpixel)
-            valid_images.append(fname)
-            idx_num = len(valid_images)
+            objPoints.append(auxObj)
+            imgPoints.append(corners_subpixel)
+            validImages.append(fname)
+            idxN = len(validImages)
             
             # Salvar visualização de cantos para TODAS as imagens válidas
-            img_corners = cv2.drawChessboardCorners(img.copy(), grid_size, corners_subpixel, ret)
-            out_corners_path = os.path.join(output_dir, f"cantos_detectados_img_{idx_num:02d}.jpg")
+            img_corners = cv2.drawChessboardCorners(img.copy(), gridSize, corners_subpixel, ret)
+            out_corners_path = os.path.join(outDir, f"cantos_detectados_img_{idxN:02d}.jpg")
             cv2.imwrite(out_corners_path, img_corners)
 
             # Manter cantos_detectados_1.jpg para compatibilidade
-            if idx_num == 1:
-                cv2.imwrite(os.path.join(output_dir, "cantos_detectados_1.jpg"), img_corners)
+            if idxN == 1:
+                cv2.imwrite(os.path.join(outDir, "cantos_detectados_1.jpg"), img_corners)
             
-            print(f"  [OK] [{idx_num:02d}] {os.path.basename(fname)}: Cantos salvas em {os.path.basename(out_corners_path)}")
+            print(f"  [OK] [{idxN:02d}] {os.path.basename(fname)}: Cantos salvas em {os.path.basename(out_corners_path)}")
         else:
             print(f"  [FAIL] {os.path.basename(fname)}: Falha na detecção dos cantos.")
 
-    print(f"\nTotal de imagens válidas utilizadas na calibração: {len(valid_images)} / {len(images_paths)}")
-    if len(valid_images) < 3:
+    print(f"\nTotal de imagens válidas utilizadas na calibração: {len(validImages)} / {len(imgPaths)}")
+    if len(validImages) < 3:
         raise RuntimeError("Número insuficiente de imagens válidas para calibração de câmera.")
+    return objPoints, imgPoints, imgS, validImages
 
-    print("\n=== 2. Calibração da Câmera Monocular (Método de Zhang) ===")
-    rms_error, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-        objpoints, imgpoints, image_shapes, None, None
+"Efetua o undistortion e salva as comparações com linhas nas imagens"
+def undistort(validImages, K, dist, outDir):
+    for idxN, imgPath in enumerate(validImages, 1):
+        #imagem original
+        imgO = cv2.imread(imgPath)
+        h, w = imgO.shape[:2]
+        
+        new_K, _ = cv2.getOptimalNewCameraMatrix(K, dist, (w, h), 1, (w, h))
+        #imagem com undistortion
+        imgU = cv2.undistort(imgO, K, dist, None, new_K)
+        
+        # Desenhar linhas guia horizontais
+        step = 100
+        for y in range(0, h, step):
+            cv2.line(imgO, (0, y), (w, y), (0, 0, 255), 1)
+            cv2.line(imgU, (0, y), (w, y), (0, 255, 0), 1)
+
+        comparativo = np.hstack((imgO, imgU))
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(comparativo, f"Original #{idxN:02d}", (30, 50), font, 1.2, (0, 0, 255), 3)
+        cv2.putText(comparativo, f"Corrigida (Undistorted) #{idxN:02d}", (w + 30, 50), font, 1.2, (0, 255, 0), 3)
+        
+        outC = os.path.join(outDir, f"undistort_img_{idxN:02d}.jpg")
+        cv2.imwrite(outC, comparativo)
+
+        if idxN == 1:
+            cv2.imwrite(os.path.join(outDir, "undistort_comparativo_1.jpg"), comparativo)
+        elif idxN == 2:
+            cv2.imwrite(os.path.join(outDir, "undistort_comparativo_2.jpg"), comparativo)
+            
+        print(f"  [OK] [{idxN:02d}] Undistort salvo em: {os.path.basename(outC)}")
+
+
+#Executa a calibração de câmera
+def calibrarCamera(imgDir = 'imagens', gridSize=(4, 9), sqSize=30.0, outDir = 'resultados'):
+    os.makedirs(outDir, exist_ok=True)
+    imgPaths = []
+
+    print(f"====== 1. Pré-processamento======")
+    imgPaths = preproces(imgDir);
+
+    print(f"====== 2. Detecção dos Cantos ======")
+    objPoints, imgPoints, imgS, validImages = cornersDetection(imgPaths, gridSize, sqSize, outDir)
+
+    print("\n===== 3. Calibração da Câmera Monocular (Método de Zhang) =====")
+    rmsE, K, dist, rvecs, tvecs = cv2.calibrateCamera(
+        objPoints, imgPoints, imgS, None, None
     )
 
     fx, fy = K[0, 0], K[1, 1]
@@ -115,52 +148,26 @@ def calibrar_camera(dir_imagens='imagens', grid_size=(4, 9), square_size=30.0, o
     print(f"k3 (Radial 3):   {k3:10.6f}")
 
     print(f"\n--- ERRO DE REPROJEÇÃO MÉDIO (RMS) ---")
-    print(f"Erro RMS Reprojection Error: {rms_error:.4f} pixels")
+    print(f"Erro RMS Reprojection Error: {rmsE:.4f} pixels")
 
-    params_path = os.path.join(output_dir, 'calibracao_parametros.npz')
+    parP = os.path.join(outDir, 'calibracao_parametros.npz')
     np.savez(
-        params_path,
-        K=K, dist=dist, rms=rms_error,
+        parP,
+        K=K, dist=dist, rms=rmsE,
         rvecs=np.array(rvecs, dtype=object),
         tvecs=np.array(tvecs, dtype=object),
-        valid_images=np.array(valid_images),
-        objpoints=np.array(objpoints, dtype=object),
-        imgpoints=np.array(imgpoints, dtype=object),
-        image_shape=image_shapes
+        validImages=np.array(validImages),
+        objPoints=np.array(objPoints, dtype=object),
+        imgPoints=np.array(imgPoints, dtype=object),
+        image_shape=imgS
     )
-    print(f"\n[OK] Parâmetros salvos em: {params_path}")
+    print(f"\n[OK] Parâmetros salvos em: {parP}")
 
-    print("\n=== 3. Remoção de Distorção (Undistortion de TODAS as Imagens) ===")
-    for idx_num, img_path in enumerate(valid_images, 1):
-        img_orig = cv2.imread(img_path)
-        h, w = img_orig.shape[:2]
-        
-        new_K, _ = cv2.getOptimalNewCameraMatrix(K, dist, (w, h), 1, (w, h))
-        img_undist = cv2.undistort(img_orig, K, dist, None, new_K)
-        
-        # Desenhar linhas guia horizontais
-        step = 100
-        for y in range(0, h, step):
-            cv2.line(img_orig, (0, y), (w, y), (0, 0, 255), 1)
-            cv2.line(img_undist, (0, y), (w, y), (0, 255, 0), 1)
-
-        comparativo = np.hstack((img_orig, img_undist))
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(comparativo, f"Original #{idx_num:02d}", (30, 50), font, 1.2, (0, 0, 255), 3)
-        cv2.putText(comparativo, f"Corrigida (Undistorted) #{idx_num:02d}", (w + 30, 50), font, 1.2, (0, 255, 0), 3)
-        
-        out_comp = os.path.join(output_dir, f"undistort_img_{idx_num:02d}.jpg")
-        cv2.imwrite(out_comp, comparativo)
-
-        if idx_num == 1:
-            cv2.imwrite(os.path.join(output_dir, "undistort_comparativo_1.jpg"), comparativo)
-        elif idx_num == 2:
-            cv2.imwrite(os.path.join(output_dir, "undistort_comparativo_2.jpg"), comparativo)
-            
-        print(f"  [OK] [{idx_num:02d}] Undistort salvo em: {os.path.basename(out_comp)}")
+    print("\n===== 4. Remoção de Distorção (Undistortion de TODAS as Imagens) =====")
+    undistort(validImages, K, dist, outDir)
 
     print("\nProcesso de calibração monocular e desdobramento concluído!\n")
-    return K, dist, rms_error, rvecs, tvecs, valid_images, objpoints, imgpoints
+    return K, dist, rmsE, rvecs, tvecs, validImages, objPoints, imgPoints
 
 if __name__ == '__main__':
-    calibrar_camera()
+    calibrarCamera()
