@@ -110,7 +110,7 @@ def undistort(validImages, K, dist, outDir):
 
 
 #Executa a calibração de câmera
-def calibrarCamera(imgDir = 'imagens', gridSize=(4, 9), sqSize=30.0, outDir = 'resultados'):
+def calibrarCamera(imgDir = 'imagens', gridSize=(4, 9), sqSize=100.0, outDir = 'resultados'):
     os.makedirs(outDir, exist_ok=True)
     imgPaths = []
 
